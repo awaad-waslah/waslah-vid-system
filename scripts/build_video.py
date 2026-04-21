@@ -15,6 +15,11 @@ SELECTED_FILES_FILE = BASE_DIR / "selected_files.txt"
 
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
 
+TARGET_WIDTH = 1080
+TARGET_HEIGHT = 1920
+TARGET_FPS = 30
+TARGET_AUDIO_RATE = 48000
+
 
 def get_videos(folder: Path) -> list[Path]:
     if not folder.exists():
@@ -32,7 +37,9 @@ def get_videos(folder: Path) -> list[Path]:
 
 
 def choose_video_type() -> str:
-    return random.choices(["frontdesk", "content"], weights=[70, 30], k=1)[0]
+    return random.choice(["frontdesk", "content"])
+    # If you want more frontdesk videos later:
+    # return random.choices(["frontdesk", "content"], weights=[70, 30], k=1)[0]
 
 
 def get_video_folder(video_type: str) -> Path:
@@ -44,22 +51,38 @@ def get_video_folder(video_type: str) -> Path:
 
 
 def run_ffmpeg(meme_path: Path, main_video_path: Path, output_path: Path) -> None:
+    video_norm = (
+        f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:force_original_aspect_ratio=decrease,"
+        f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+        f"fps={TARGET_FPS},setsar=1,format=yuv420p"
+    )
+
+    filter_complex = (
+        f"[0:v]{video_norm}[v0];"
+        f"[1:v]{video_norm}[v1];"
+        f"[0:a]aresample={TARGET_AUDIO_RATE},aformat=sample_rates={TARGET_AUDIO_RATE}:"
+        f"channel_layouts=stereo[a0];"
+        f"[1:a]aresample={TARGET_AUDIO_RATE},aformat=sample_rates={TARGET_AUDIO_RATE}:"
+        f"channel_layouts=stereo[a1];"
+        f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]"
+    )
+
     cmd = [
         "ffmpeg",
         "-y",
         "-i", str(meme_path),
         "-i", str(main_video_path),
-        "-filter_complex", "[0:v:0][0:a:0][1:v:0][1:a:0]concat=n=2:v=1:a=1[outv][outa]",
+        "-filter_complex", filter_complex,
         "-map", "[outv]",
         "-map", "[outa]",
         "-c:v", "libx264",
         "-profile:v", "high",
         "-level", "4.1",
         "-pix_fmt", "yuv420p",
-        "-r", "30",
+        "-r", str(TARGET_FPS),
         "-movflags", "+faststart",
         "-c:a", "aac",
-        "-ar", "48000",
+        "-ar", str(TARGET_AUDIO_RATE),
         "-ac", "2",
         "-b:a", "128k",
         "-preset", "veryfast",
