@@ -1,0 +1,106 @@
+name: Build Video and Publish Raw URL
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-video-publish-raw
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out main branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Build final video
+        run: python scripts/build_video.py
+
+      - name: Verify output exists
+        run: |
+          test -f output.mp4 || (echo "output.mp4 not found" && exit 1)
+          ls -lh output.mp4
+
+      - name: Verify video type exists
+        run: |
+          test -f video_type.txt || (echo "video_type.txt not found" && exit 1)
+          cat video_type.txt
+
+      - name: Read video type
+        id: type
+        run: |
+          TYPE=$(cat video_type.txt | tr -d '\r\n')
+          echo "type=$TYPE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish latest.mp4 to generated branch
+        run: |
+          set -e
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p /tmp/generated-branch
+          cp output.mp4 /tmp/generated-branch/latest.mp4
+
+          cd /tmp/generated-branch
+          git init
+          git checkout -b generated
+          git add latest.mp4
+          git commit -m "Update latest.mp4 from run ${{ github.run_id }}"
+
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git push --force origin generated
+
+      - name: Send raw URL to Make webhook
+        env:
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
+        run: |
+          RAW_URL="https://raw.githubusercontent.com/${{ github.repository }}/generated/latest.mp4?v=${{ github.run_id }}"
+
+          curl --fail --location \
+            -X POST "$MAKE_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg file_url "$RAW_URL" \
+              --arg file_name "latest.mp4" \
+              --arg video_type "${{ steps.type.outputs.type }}" \
+              --arg source "github-actions" \
+              --arg workflow "${{ github.workflow }}" \
+              --arg run_id "${{ github.run_id }}" \
+              --arg repository "${{ github.repository }}" \
+              '{
+                file_url: $file_url,
+                file_name: $file_name,
+                video_type: $video_type,
+                source: $source,
+                workflow: $workflow,
+                run_id: $run_id,
+                repository: $repository
+              }')"
+
+      - name: Upload debug artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-video-debug
+          path: |
+            output.mp4
+            video_type.txt
+            selected_files.txt
