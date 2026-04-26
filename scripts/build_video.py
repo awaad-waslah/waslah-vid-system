@@ -37,7 +37,7 @@ def get_videos(folder: Path) -> list[Path]:
 
 
 def choose_video_type() -> str:
-    return random.choice(["frontdesk", "content"])
+    return random.choice(["frontdesk"])
     # If you want more frontdesk videos later:
     # return random.choices(["frontdesk", "content"], weights=[70, 30], k=1)[0]
 
